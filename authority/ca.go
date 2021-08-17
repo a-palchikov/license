@@ -20,7 +20,7 @@ package authority
 import (
 	"crypto"
 	"crypto/rsa"
-	"crypto/x509"
+	"io"
 	"io/ioutil"
 	"time"
 
@@ -63,7 +63,7 @@ func NewTLSKeyPair(keyPath, certPath string) (*TLSKeyPair, error) {
 // GenerateSelfSignedCA generates self signed certificate authority
 func GenerateSelfSignedCA(req csr.CertificateRequest) (*TLSKeyPair, error) {
 	if req.KeyRequest == nil {
-		req.KeyRequest = &csr.BasicKeyRequest{
+		req.KeyRequest = &csr.KeyRequest{
 			A: constants.TLSKeyAlgo,
 			S: constants.TLSKeySize,
 		}
@@ -132,26 +132,31 @@ func GenerateCertificateWithExtensions(req csr.CertificateRequest, certAuthority
 	}, nil
 }
 
+var defaultKeyRequest = &csr.KeyRequest{
+	A: constants.TLSKeyAlgo,
+	S: constants.TLSKeySize,
+}
+
 // GenerateCSR generates new certificate signing request for existing key if supplied
 // or generates new private key otherwise
 func GenerateCSR(req csr.CertificateRequest, privateKeyPEM []byte) (csrBytes []byte, key []byte, err error) {
-	generator := &csr.Generator{
-		Validator: func(req *csr.CertificateRequest) error {
-			return nil
-		},
-	}
 	if len(privateKeyPEM) != 0 {
 		existingKey, err := NewExistingKey(privateKeyPEM)
 		if err != nil {
 			return nil, nil, trace.Wrap(err)
 		}
-		req.KeyRequest = existingKey
-	} else {
-		req.KeyRequest = &csr.BasicKeyRequest{
-			A: constants.TLSKeyAlgo,
-			S: constants.TLSKeySize,
+		csrBytes, err = csr.Generate(existingKey, &req)
+		if err != nil {
+			return nil, nil, trace.Wrap(err)
 		}
+		return csrBytes, privateKeyPEM, nil
 	}
+	generator := &csr.Generator{
+		Validator: func(req *csr.CertificateRequest) error {
+			return nil
+		},
+	}
+	req.KeyRequest = defaultKeyRequest
 
 	csrBytes, key, err = generator.ProcessRequest(&req)
 	if err != nil {
@@ -211,33 +216,12 @@ func NewExistingKey(keyPEM []byte) (*ExistingKey, error) {
 	return &ExistingKey{key: rkey}, nil
 }
 
-// Algo returns the requested key algorithm represented as a string.
-func (kr *ExistingKey) Algo() string {
-	return "rsa"
+// Public returns the public key of this existing private key
+func (kr *ExistingKey) Public() crypto.PublicKey {
+	return kr.key.Public()
 }
 
-// Size returns the requested key size.
-func (kr *ExistingKey) Size() int {
-	return kr.key.N.BitLen()
-}
-
-// Generate generates a key as specified in the request. Currently,
-// only ECDSA and RSA are supported.
-func (kr *ExistingKey) Generate() (crypto.PrivateKey, error) {
-	return kr.key, nil
-}
-
-// SigAlgo returns an appropriate X.509 signature algorithm given the
-// key request's type and size.
-func (kr *ExistingKey) SigAlgo() x509.SignatureAlgorithm {
-	switch {
-	case kr.Size() >= 4096:
-		return x509.SHA512WithRSA
-	case kr.Size() >= 3072:
-		return x509.SHA384WithRSA
-	case kr.Size() >= 2048:
-		return x509.SHA256WithRSA
-	default:
-		return x509.SHA1WithRSA
-	}
+// Sign signs digest with the existing private key
+func (kr *ExistingKey) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts) (signature []byte, err error) {
+	return kr.key.Sign(rand, digest, opts)
 }

@@ -90,6 +90,6 @@ func (s *LicenseSuite) TestExpiredLicense(c *C) {
 }
 
 const (
-	validLicense   = `{"cluster_id": "4fea07ba370f389b", "expiration": "2020-12-31 00:00:00", "maxnodes": "17", "maxcores": "32"}`
+	validLicense   = `{"cluster_id": "4fea07ba370f389b", "expiration": "2030-12-31 00:00:00", "maxnodes": "17", "maxcores": "32"}`
 	expiredLicense = `{"cluster_id": "4fea07ba370f389b", "expiration": "2010-12-31 00:00:00"}`
 )
